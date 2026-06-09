@@ -1,0 +1,196 @@
+// O unico valor que é aleatorio é o tempo de reação
+// gerado aqui no codigo
+// é possivel ver tudo no monitor serial
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+#define endereco 0x27
+LiquidCrystal_I2C lcd(endereco, 16, 2);
+
+// Sensores
+const int potEstresse  = A2;
+const int potSono      = A1;
+const int potFadiga    = A0;
+const int potBatimento = A3;
+
+// LEDs e buzzer
+const int ledVerde    = 13;
+const int ledAmarelo  = 12;
+const int ledVermelho = 11;
+const int buzzer      = 10;
+
+// Nomes
+const char* nomes[] = {
+  "Estresse",
+  "Sono (h)",
+  "Fadiga",
+  "Batimentos",
+  "Reacao"
+};
+
+int pinos[] = { potEstresse, potSono, potFadiga, potBatimento };
+int maxValores[] = { 100, 12, 100, 200 };
+
+int leituras[5];
+
+int displayAtual = 0;
+unsigned long ultimaTroca = 0;
+const unsigned long intervaloTroca = 2000;
+
+// Tempo de reação
+int tempoReacao = 0;
+unsigned long ultimoTempoReacao = 0;
+
+void setup() {
+
+  pinMode(ledVerde, OUTPUT);
+  pinMode(ledAmarelo, OUTPUT);
+  pinMode(ledVermelho, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+
+  Serial.begin(9600);
+
+  // LCD (DO SEU CÓDIGO)
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+
+  lcd.setCursor(0,0);
+  lcd.print("ASTRASYNC AI");
+  lcd.setCursor(0,1);
+  lcd.print("Iniciando...");
+  delay(2000);
+  lcd.clear();
+
+  randomSeed(analogRead(A5));
+}
+
+void loop() {
+
+  // Leitura sensores
+  for (int i = 0; i < 4; i++) {
+    leituras[i] = map(analogRead(pinos[i]), 0, 1023, 0, maxValores[i]);
+  }
+
+  // Tempo de reação (inteligente)
+  if (millis() - ultimoTempoReacao > 1500) {
+    ultimoTempoReacao = millis();
+
+    tempoReacao = random(200, 300)
+                + (leituras[0] * 2)   // estresse piora
+                + (leituras[2] * 2);  // fadiga piora
+
+    leituras[4] = tempoReacao;
+  }
+
+  int estabilidade = (leituras[1]) - (leituras[2] + leituras[0]);
+
+  int nivelAlerta = calcularAlerta();
+
+  atualizarAlertas(nivelAlerta);
+
+  // LCD ROTATIVO
+  if (millis() - ultimaTroca >= intervaloTroca) {
+    ultimaTroca = millis();
+
+    lcd.clear();
+    exibirNoLCD(displayAtual, nivelAlerta, estabilidade);
+
+    displayAtual = (displayAtual + 1) % 6;
+  }
+
+  delay(200);
+}
+
+// =====================
+
+int calcularAlerta() {
+
+  if (leituras[0] >= 70 || leituras[2] >= 70 || leituras[1] <= 3 || leituras[4] > 600) {
+    return 2;
+  }
+
+  if (leituras[0] >= 40 || leituras[2] >= 40 || leituras[1] <= 5 || leituras[4] > 450) {
+    return 1;
+  }
+
+  return 0;
+}
+
+void atualizarAlertas(int nivel) {
+
+  digitalWrite(ledVerde,    nivel == 0);
+  digitalWrite(ledAmarelo,  nivel == 1);
+  digitalWrite(ledVermelho, nivel == 2);
+
+  if (nivel == 2) tone(buzzer, 300);
+  else noTone(buzzer);
+}
+
+void exibirNoLCD(int tela, int nivelAlerta, int estabilidade) {
+
+  if (tela < 5) {
+
+    lcd.setCursor(0, 0);
+    lcd.print(nomes[tela]);
+
+    lcd.setCursor(0, 1);
+    lcd.print("Val: ");
+    lcd.print(leituras[tela]);
+
+    if (tela == 1) lcd.print("h");
+    else if (tela == 3) lcd.print("bpm");
+    else if (tela == 4) lcd.print("ms");
+    else lcd.print("%");
+
+    lcd.setCursor(15,0);
+    if (nivelAlerta == 2) lcd.print("!");
+    else if (nivelAlerta == 1) lcd.print("~");
+    else lcd.print(".");
+
+  } else {
+
+    lcd.setCursor(0, 0);
+    if (nivelAlerta == 0) lcd.print("STATUS: NORMAL");
+    else if (nivelAlerta == 1) lcd.print("STATUS: ALERTA");
+    else lcd.print("STATUS: CRITICO");
+
+    lcd.setCursor(0, 1);
+    lcd.print("E:");
+    lcd.print(estabilidade);
+    lcd.print(" R:");
+    lcd.print(leituras[4]);
+  }
+  Serial.println("===== ASTRASYNC =====");
+
+  Serial.print("Estresse: ");
+  Serial.print(leituras[0]);
+  Serial.println(" %");
+
+  Serial.print("Sono: ");
+  Serial.print(leituras[1]);
+  Serial.println(" h");
+
+  Serial.print("Fadiga: ");
+  Serial.print(leituras[2]);
+  Serial.println(" %");
+
+  Serial.print("Batimentos: ");
+  Serial.print(leituras[3]);
+  Serial.println(" bpm");
+
+  Serial.print("Tempo de Reacao: ");
+  Serial.print(leituras[4]);
+  Serial.println(" ms");
+
+  Serial.print("Estabilidade: ");
+  Serial.println(estabilidade);
+
+  // Nivel de alerta
+  Serial.print("Status: ");
+  if (nivelAlerta == 0) Serial.println("NORMAL");
+  else if (nivelAlerta == 1) Serial.println("ATENCAO");
+  else Serial.println("CRITICO");
+
+  Serial.println("======================\n");
+}
